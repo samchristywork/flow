@@ -52,13 +52,15 @@ fn extract_functions(
         let source_code = std::fs::read_to_string(filename)
             .map_err(|e| format!("Failed to read file {filename}: {e}"))?;
         let mut function = Function::new();
+        let loc = source_code.lines().count();
+
         for line in source_code.lines() {
             // Handle the start of a function
             let mut found_start = false;
             for s in start {
                 if line.starts_with(s) {
                     function.name = extract_function_name(line, s)?;
-                    function.module.clone_from(filename);
+                    function.module = format!("{filename}:{loc}");
                     function.body = String::from("{");
                     found_start = true;
                     break;
@@ -86,7 +88,7 @@ fn extract_functions(
 
 fn generate_cluster(module: &str, functions: &[Function]) -> String {
     "subgraph cluster_".to_string()
-        + &module.replace(['.', '-', '/'], "_")
+        + &module.replace(['.', '-', '/', ':'], "_")
         + "{label = \""
         + module
         + "\";bgcolor=\"#eeeeee\";"
