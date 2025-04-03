@@ -33,40 +33,55 @@ impl Function {
     }
 }
 
-fn extract_functions(filenames: &[String], start: &str, end: &str) -> Vec<Function> {
-    filenames
-        .iter()
-        .fold(Vec::new(), |mut functions, filename| {
-            let source_code = std::fs::read_to_string(filename)
-                .unwrap_or_else(|_| panic!("Failed to read file: {filename}"));
+fn extract_function_name(line: &str, start: &str) -> Result<String, String> {
+    let idx = start.len()
+        + line[start.len()..]
+            .find('(')
+            .ok_or_else(|| format!("Failed to find function end in line: {line}"))?;
 
-            let mut function = Function::new();
-            for line in source_code.lines() {
-                if line.starts_with(start) {
-                    function = Function {
-                        name: line[3..line
-                            .find('(')
-                            .expect("No opening parenthesis found in the function signature")]
-                            .to_string(),
-                        body: String::from("{"),
-                        module: String::from(filename),
-                    };
-                    continue;
-                }
+    Ok(line[start.len()..idx].trim().to_string())
+}
 
-                if !function.name.is_empty() {
-                    function.body.push_str(line);
-                    function.body.push('\n');
-
-                    if line.starts_with(end) {
-                        functions.push(function);
-                        function = Function::new();
-                    }
+fn extract_functions(
+    filenames: &[String],
+    start: &[&str],
+    end: &str,
+) -> Result<Vec<Function>, String> {
+    let mut functions = Vec::new();
+    for filename in filenames {
+        let source_code = std::fs::read_to_string(filename)
+            .map_err(|e| format!("Failed to read file {filename}: {e}"))?;
+        let mut function = Function::new();
+        for line in source_code.lines() {
+            // Handle the start of a function
+            let mut found_start = false;
+            for s in start {
+                if line.starts_with(s) {
+                    function.name = extract_function_name(line, s)?;
+                    function.module.clone_from(filename);
+                    function.body = String::from("{");
+                    found_start = true;
+                    break;
                 }
             }
+            if found_start {
+                continue;
+            }
 
-            functions
-        })
+            // Handle the body of the function
+            if !function.name.is_empty() {
+                function.body.push_str(format!("{line}\n").as_str());
+
+                // Recognize the end of a function
+                if line.starts_with(end) {
+                    functions.push(function);
+                    function = Function::new();
+                }
+            }
+        }
+    }
+
+    Ok(functions)
 }
 
 fn generate_cluster(module: &str, functions: &[Function]) -> String {
@@ -74,7 +89,7 @@ fn generate_cluster(module: &str, functions: &[Function]) -> String {
         + &module.replace(['.', '-', '/'], "_")
         + "{label = \""
         + module
-        + "\";"
+        + "\";bgcolor=\"#eeeeee\";"
         + &functions
             .iter()
             .filter(|f| f.module == *module)
@@ -107,15 +122,21 @@ fn generate_links(functions: &[Function]) -> String {
         .collect::<String>()
 }
 
-fn generate_callgraph(filenames: &[String], start: &str, end: &str) -> String {
-    let functions = extract_functions(filenames, start, end);
-    String::from("strict digraph {graph [rankdir=LR];node [shape=box];")
+fn generate_callgraph(filenames: &[String], start: &[&str], end: &str) -> Result<String, String> {
+    let functions = extract_functions(filenames, start, end)?;
+    Ok(String::from("strict digraph {")
+        + "graph [rankdir=LR];"
+        + "node [shape=box;style=filled;fillcolor=\"#ffffff\"];"
         + generate_clusters(&functions).as_str()
         + generate_links(&functions).as_str()
-        + "}"
+        + "}")
 }
 
 fn main() {
     let filenames = std::env::args().skip(1).collect::<Vec<_>>();
-    println!("{}", generate_callgraph(&filenames, "fn ", "}"));
+    let callgraph = generate_callgraph(&filenames, &["fn ", "pub fn"], "}").unwrap_or_else(|err| {
+        eprintln!("Error: {err}");
+        std::process::exit(1);
+    });
+    println!("{callgraph}");
 }
