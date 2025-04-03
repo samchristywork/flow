@@ -58,5 +58,27 @@ fn extract_functions(source_code: &str, start_pattern: &str, end_pattern: &str) 
     functions
 }
 
+fn link(f1: &Function, f2: &Function) -> String {
+    format!(r#""{}" -> "{}";"#, f1.label(), f2.label())
+}
+
+fn generate_callgraph(filename: &str) -> String {
+    let source_code = std::fs::read_to_string(filename).expect("Unable to read file");
+    let functions = extract_functions(&source_code, "fn ", "}");
+    String::from("strict digraph {graph [rankdir=LR];node [shape=box];")
+        + &functions
+            .iter()
+            .map(|f1| {
+                functions
+                    .iter()
+                    .filter(|f2| f1.check_for_function_in_body(f2))
+                    .map(|f2| link(f1, f2))
+                    .collect::<String>()
+            })
+            .collect::<String>()
+        + "}"
+}
+
 fn main() {
+    println!("{}", generate_callgraph("./src/main.rs"));
 }
