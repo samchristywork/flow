@@ -2,6 +2,7 @@
 struct Function {
     name: String,
     body: String,
+    module: String,
 }
 
 impl Function {
@@ -22,6 +23,7 @@ impl Function {
     fn clear(&mut self) {
         self.name.clear();
         self.body.clear();
+        self.module.clear();
     }
 
     fn link(&self, f: &Self) -> String {
@@ -29,32 +31,40 @@ impl Function {
     }
 }
 
-fn extract_functions(source_code: &str, start: &str, end: &str) -> Vec<Function> {
-    let mut function = Function {
-        name: String::new(),
-        body: String::new(),
-    };
-
+fn extract_functions(filenames: &[String], start: &str, end: &str) -> Vec<Function> {
     let mut functions = Vec::new();
-    for line in source_code.lines() {
-        if line.starts_with(start) {
-            function = Function {
-                name: line[3..line
-                    .find('(')
-                    .expect("No opening parenthesis found in the function signature")]
-                    .to_string(),
-                body: String::from("{"),
-            };
-            continue;
-        }
 
-        if !function.name.is_empty() {
-            function.body.push_str(line);
-            function.body.push('\n');
+    for filename in filenames {
+        let source_code = std::fs::read_to_string(filename)
+            .unwrap_or_else(|_| panic!("Failed to read file: {filename}"));
 
-            if line.starts_with(end) {
-                functions.push(function.clone());
-                function.clear();
+        let mut function = Function {
+            name: String::new(),
+            body: String::new(),
+            module: String::new(),
+        };
+
+        for line in source_code.lines() {
+            if line.starts_with(start) {
+                function = Function {
+                    name: line[3..line
+                        .find('(')
+                        .expect("No opening parenthesis found in the function signature")]
+                        .to_string(),
+                    body: String::from("{"),
+                    module: String::from(filename),
+                };
+                continue;
+            }
+
+            if !function.name.is_empty() {
+                function.body.push_str(line);
+                function.body.push('\n');
+
+                if line.starts_with(end) {
+                    functions.push(function.clone());
+                    function.clear();
+                }
             }
         }
     }
@@ -62,10 +72,35 @@ fn extract_functions(source_code: &str, start: &str, end: &str) -> Vec<Function>
     functions
 }
 
-fn generate_callgraph(filename: &str, start: &str, end: &str) -> String {
-    let source_code = std::fs::read_to_string(filename).expect("Unable to read file");
-    let functions = extract_functions(&source_code, start, end);
+fn sanitize_filename(filename: &str) -> String {
+    filename.replace(['.', '-', '/'], "_")
+}
+
+fn generate_callgraph(filenames: &[String], start: &str, end: &str) -> String {
+    let functions = extract_functions(filenames, start, end);
+    let modules = functions
+        .iter()
+        .map(|f| f.module.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+
     String::from("strict digraph {graph [rankdir=LR];node [shape=box];")
+        + &modules
+            .iter()
+            .map(|module| {
+                "subgraph cluster_".to_string()
+                    + &sanitize_filename(module)
+                    + "{label = \""
+                    + module
+                    + "\";"
+                    + &functions
+                        .iter()
+                        .filter(|f| f.module == *module)
+                        .fold(String::new(), |acc, f| acc + "\"" + &f.label() + "\";")
+                    + "}"
+            })
+            .collect::<String>()
         + &functions
             .iter()
             .map(|f1| {
@@ -80,6 +115,6 @@ fn generate_callgraph(filename: &str, start: &str, end: &str) -> String {
 }
 
 fn main() {
-    let filename = std::env::args().nth(1).expect("No filename provided");
-    println!("{}", generate_callgraph(&filename, "fn ", "}"));
+    let filenames = std::env::args().skip(1).collect::<Vec<_>>();
+    println!("{}", generate_callgraph(&filenames, "fn ", "}"));
 }
