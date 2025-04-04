@@ -48,8 +48,8 @@ fn extract_function_name(line: &str) -> String {
 
 fn extract_functions(
     filenames: &[String],
-    start: &[&str],
-    end: &str,
+    start: &Regex,
+    end: &Regex,
 ) -> Result<Vec<Function>, String> {
     let mut functions = Vec::new();
     for filename in filenames {
@@ -60,17 +60,10 @@ fn extract_functions(
 
         for line in source_code.lines() {
             // Handle the start of a function
-            let mut found_start = false;
-            for s in start {
-                if line.starts_with(s) {
-                    function.name = extract_function_name(line);
-                    function.module = format!("{filename}:{loc}");
-                    function.body = String::from("{");
-                    found_start = true;
-                    break;
-                }
-            }
-            if found_start {
+            if start.is_match(line) {
+                function.name = extract_function_name(line);
+                function.module = format!("{filename}:{loc}");
+                function.body = String::from("{");
                 continue;
             }
 
@@ -79,7 +72,7 @@ fn extract_functions(
                 function.body.push_str(format!("{line}\n").as_str());
 
                 // Recognize the end of a function
-                if line.starts_with(end) {
+                if end.is_match(line) {
                     functions.push(function);
                     function = Function::new();
                 }
@@ -128,7 +121,7 @@ fn generate_links(functions: &[Function]) -> String {
         .collect::<String>()
 }
 
-fn generate_callgraph(filenames: &[String], start: &[&str], end: &str) -> Result<String, String> {
+fn generate_callgraph(filenames: &[String], start: &Regex, end: &Regex) -> Result<String, String> {
     let functions = extract_functions(filenames, start, end)?;
     Ok(String::from("strict digraph {")
         + "graph [rankdir=LR];"
@@ -140,7 +133,10 @@ fn generate_callgraph(filenames: &[String], start: &[&str], end: &str) -> Result
 
 fn main() {
     let filenames = std::env::args().skip(1).collect::<Vec<_>>();
-    let callgraph = generate_callgraph(&filenames, &["fn ", "pub fn"], "}").unwrap_or_else(|err| {
+    let start = Regex::new(r"^fn |^pub fn ").expect("Invalid regex pattern");
+    let end = Regex::new(r"^}").expect("Invalid regex pattern");
+
+    let callgraph = generate_callgraph(&filenames, &start, &end).unwrap_or_else(|err| {
         eprintln!("Error: {err}");
         std::process::exit(1);
     });
