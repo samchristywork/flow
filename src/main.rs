@@ -37,7 +37,6 @@ impl Function {
 
 fn extract_function_name(line: &str) -> String {
     let idx = line.find('(').expect("Failed to find function identifier");
-
     (*line[..idx]
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -50,11 +49,11 @@ fn extract_functions(
     filenames: &[String],
     start: &Regex,
     end: &Regex,
-) -> Result<Vec<Function>, String> {
+) -> Result<Vec<Function>, std::io::Error> {
     let mut functions = Vec::new();
+
     for filename in filenames {
-        let source_code = std::fs::read_to_string(filename)
-            .map_err(|e| format!("Failed to read file {filename}: {e}"))?;
+        let source_code = std::fs::read_to_string(filename)?;
         let mut function = Function::new();
         let loc = source_code.lines().count();
 
@@ -64,12 +63,10 @@ fn extract_functions(
                 function.name = extract_function_name(line);
                 function.module = format!("{filename}:{loc}");
                 function.body = String::from("{");
-                continue;
-            }
 
             // Handle the body of the function
-            if !function.name.is_empty() {
-                function.body.push_str(format!("{line}\n").as_str());
+            } else if !function.name.is_empty() {
+                function.body.push_str((String::from(line) + "\n").as_str());
 
                 // Recognize the end of a function
                 if end.is_match(line) {
@@ -148,7 +145,11 @@ fn generate_legend(functions: &[Function]) -> String {
         + "];"
 }
 
-fn generate_callgraph(filenames: &[String], start: &Regex, end: &Regex) -> Result<String, String> {
+fn generate_callgraph(
+    filenames: &[String],
+    start: &Regex,
+    end: &Regex,
+) -> Result<String, std::io::Error> {
     let functions = extract_functions(filenames, start, end)?;
     Ok(String::from("strict digraph {")
         + "graph [rankdir=LR];"
