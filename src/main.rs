@@ -1,3 +1,5 @@
+use regex::Regex;
+
 #[derive(Clone)]
 struct Function {
     name: String,
@@ -33,13 +35,15 @@ impl Function {
     }
 }
 
-fn extract_function_name(line: &str, start: &str) -> Result<String, String> {
-    let idx = start.len()
-        + line[start.len()..]
-            .find('(')
-            .ok_or_else(|| format!("Failed to find function end in line: {line}"))?;
+fn extract_function_name(line: &str) -> String {
+    let idx = line.find('(').expect("Failed to find function identifier");
 
-    Ok(line[start.len()..idx].trim().to_string())
+    (*line[..idx]
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .last()
+        .expect("Failed to find function identifier"))
+    .to_string()
 }
 
 fn extract_functions(
@@ -59,7 +63,7 @@ fn extract_functions(
             let mut found_start = false;
             for s in start {
                 if line.starts_with(s) {
-                    function.name = extract_function_name(line, s)?;
+                    function.name = extract_function_name(line);
                     function.module = format!("{filename}:{loc}");
                     function.body = String::from("{");
                     found_start = true;
