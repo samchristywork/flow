@@ -121,11 +121,40 @@ fn generate_links(functions: &[Function]) -> String {
         .collect::<String>()
 }
 
+fn table_row(label: &str, value: &str) -> String {
+    format!("<tr><td align=\"left\">{label}</td><td align=\"right\">{value}</td></tr>")
+}
+
+fn generate_legend(functions: &[Function]) -> String {
+    let lines_of_code = functions.iter().map(|f| f.body_length()).sum::<usize>();
+    let num_functions = functions.len();
+    let num_modules = functions
+        .iter()
+        .map(|f| f.module.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>()
+        .len();
+
+    "legend".to_string()
+        + "["
+        + "shape=plaintext;"
+        + "label=<"
+        + "<table border=\"0\" cellborder=\"1\" cellspacing=\"0\">"
+        + &table_row("Modules", format!("{num_modules}").as_str())
+        + &table_row("Functions", format!("{num_functions}").as_str())
+        + &table_row("Lines", format!("{lines_of_code}").as_str())
+        + "</table>"
+        + ">;"
+        + "];"
+}
+
 fn generate_callgraph(filenames: &[String], start: &Regex, end: &Regex) -> Result<String, String> {
     let functions = extract_functions(filenames, start, end)?;
     Ok(String::from("strict digraph {")
         + "graph [rankdir=LR];"
         + "node [shape=box;style=filled;fillcolor=\"#ffffff\"];"
+        + generate_legend(&functions).as_str()
         + generate_clusters(&functions).as_str()
         + generate_links(&functions).as_str()
         + "}")
