@@ -1,23 +1,31 @@
 use clap::Parser;
 use regex::Regex;
-use std::{collections::HashSet, fs::read_to_string, process::exit};
+use std::{fs::read_to_string, process::exit};
+
+#[derive(Clone)]
+struct Module {
+    filename: String,
+    source_code: String,
+}
+
+impl Module {
+    fn label(&self) -> String {
+        format!("{}:{}", self.filename, self.source_code.lines().count())
+    }
+
+    fn id(&self)->String{
+        self.filename.replace(['.', '-', '/', ':'], "_")
+    }
+}
 
 #[derive(Clone)]
 struct Function {
     name: String,
     body: String,
-    module: String,
+    module: Module,
 }
 
 impl Function {
-    const fn new() -> Self {
-        Self {
-            name: String::new(),
-            body: String::new(),
-            module: String::new(),
-        }
-    }
-
     fn body_length(&self) -> usize {
         self.body.lines().count()
     }
@@ -27,10 +35,11 @@ impl Function {
     }
 
     fn check_for_function_in_body(&self, f: &Self) -> bool {
+        let body = self.body.lines().skip(1).collect::<String>();
         // TODO: Add better error message
         Regex::new(&format!(r"\b{}\b\(", f.name))
             .unwrap()
-            .is_match(&self.body)
+            .is_match(&body)
     }
 
     fn link(&self, f: &Self) -> String {
@@ -46,24 +55,24 @@ fn extract_function_name(line: &str, re: &Regex) -> String {
 }
 
 fn extract_functions(
-    filenames: &[String],
+    modules: &[Module],
     start: &Regex,
     end: &Regex,
     function_cleanup: &Regex,
 ) -> Vec<Function> {
-    filenames
+    modules
         .iter()
-        .fold(Vec::new(), |mut functions, filename| {
-            // TODO: Do this in main
-            let source_code = read_to_string(filename).unwrap();
-            let mut function = Function::new();
-            let loc = source_code.lines().count();
-
-            for line in source_code.lines() {
+        .fold(Vec::new(), |mut functions, module| {
+            let mut function = Function {
+                name: String::new(),
+                body: String::new(),
+                module: module.clone(),
+            };
+            for line in module.source_code.lines() {
                 // Handle the start of a function
                 if start.is_match(line) {
                     function.name = extract_function_name(line, function_cleanup);
-                    function.module = format!("{filename}:{loc}"); // TODO
+                    function.module = module.clone();
                     function.body = line.to_string();
 
                 // Handle the body of the function
@@ -73,7 +82,11 @@ fn extract_functions(
                     // Recognize the end of a function
                     if end.is_match(line) {
                         functions.push(function);
-                        function = Function::new();
+                        function = Function {
+                            name: String::new(),
+                            body: String::new(),
+                            module: module.clone(),
+                        };
                     }
                 }
             }
@@ -81,27 +94,21 @@ fn extract_functions(
         })
 }
 
-fn generate_cluster(module: &str, functions: &[Function]) -> String {
+fn generate_cluster(module: &Module, functions: &[Function]) -> String {
     "subgraph cluster_".to_string()
-        + &module.replace(['.', '-', '/', ':'], "_")
+        + &module.id()
         + "{label=\""
-        + module
+        + &module.label()
         + "\";bgcolor=\"#eeeeee\";"
         + &functions
             .iter()
-            .filter(|f| f.module == *module)
+            .filter(|f| f.module.filename == module.filename)
             .fold(String::new(), |acc, f| acc + "\"" + &f.label() + "\";")
         + "}"
 }
 
-fn generate_clusters(functions: &[Function]) -> String {
-    functions
-        .iter()
-        .map(|f| f.module.clone())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>()
-        .iter()
+fn generate_clusters(modules: &[Module], functions: &[Function]) -> String {
+    modules.iter()
         .map(|module| generate_cluster(module, functions))
         .collect::<String>()
 }
@@ -123,8 +130,11 @@ fn table_row(label: &str, value: &str) -> String {
     format!("<tr><td align=\"left\">{label}</td><td align=\"right\">{value}</td></tr>")
 }
 
-fn generate_legend(functions: &[Function], modules: &[String]) -> String {
-    let lines_of_code = functions.iter().map(Function::body_length).sum::<usize>();
+fn generate_legend(modules: &[Module], functions: &[Function]) -> String {
+    let lines_of_code = modules
+        .iter()
+        .map(|m| m.source_code.lines().count())
+        .sum::<usize>();
     let num_functions = functions.len();
     let num_modules = modules.len();
 
@@ -142,22 +152,17 @@ fn generate_legend(functions: &[Function], modules: &[String]) -> String {
 }
 
 fn generate_callgraph(
-    filenames: &[String],
+    modules: &[Module],
     start: &Regex,
     end: &Regex,
     function_cleanup: &Regex,
 ) -> String {
-    let functions = extract_functions(filenames, start, end, function_cleanup);
-    let modules = functions
-        .iter()
-        .map(|f| f.module.clone())
-        .collect::<HashSet<_>>();
-
+    let functions = extract_functions(modules, start, end, function_cleanup);
     String::from("strict digraph {")
         + "graph [rankdir=LR];"
         + "node [shape=box;style=filled;fillcolor=\"#ffffff\"];"
-        + generate_legend(&functions, &modules.into_iter().collect::<Vec<_>>()).as_str()
-        + generate_clusters(&functions).as_str()
+        + generate_legend(modules, &functions).as_str()
+        + generate_clusters(modules, &functions).as_str()
         + generate_links(&functions).as_str()
         + "}"
 }
@@ -197,6 +202,21 @@ fn main() {
         }
     };
 
-    let callgraph = generate_callgraph(&args.files, &start, &end, &function_cleanup);
+    let modules: Vec<Module> = args
+        .files
+        .iter()
+        .map(|filename| {
+            let source_code = read_to_string(filename).unwrap_or_else(|_| {
+                eprintln!("Error: Could not read file {filename}");
+                exit(1);
+            });
+            Module {
+                filename: filename.clone(),
+                source_code,
+            }
+        })
+        .collect();
+
+    let callgraph = generate_callgraph(&modules, &start, &end, &function_cleanup);
     println!("{callgraph}");
 }
