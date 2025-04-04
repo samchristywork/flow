@@ -1,4 +1,5 @@
 use regex::Regex;
+use std::{collections::HashSet, fs::read_to_string, process::exit};
 
 #[derive(Clone)]
 struct Function {
@@ -31,59 +32,57 @@ impl Function {
     }
 
     fn link(&self, f: &Self) -> String {
-        format!(r#""{}" -> "{}";"#, self.label(), f.label())
+        format!(r#""{}"->"{}";"#, self.label(), f.label())
     }
 }
 
-fn extract_function_name(line: &str) -> String {
-    let idx = line.find('(').expect("Failed to find function identifier");
-    (*line[..idx]
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .last()
-        .expect("Failed to find function identifier"))
-    .to_string()
+fn extract_function_name(line: &str, re: &Regex) -> String {
+    re.find(line).map_or_else(
+        || line.to_string(),
+        |m| extract_function_name(&(String::new() + &line[..m.start()] + &line[m.end()..]), re),
+    )
 }
 
 fn extract_functions(
     filenames: &[String],
     start: &Regex,
     end: &Regex,
-) -> Result<Vec<Function>, std::io::Error> {
-    let mut functions = Vec::new();
+    function_cleanup: &Regex,
+) -> Vec<Function> {
+    filenames
+        .iter()
+        .fold(Vec::new(), |mut functions, filename| {
+            // TODO: Do this in main
+            let source_code = read_to_string(filename).unwrap();
+            let mut function = Function::new();
+            let loc = source_code.lines().count();
 
-    for filename in filenames {
-        let source_code = std::fs::read_to_string(filename)?;
-        let mut function = Function::new();
-        let loc = source_code.lines().count();
+            for line in source_code.lines() {
+                // Handle the start of a function
+                if start.is_match(line) {
+                    function.name = extract_function_name(line, function_cleanup);
+                    function.module = format!("{filename}:{loc}"); // TODO
+                    function.body = line.to_string();
 
-        for line in source_code.lines() {
-            // Handle the start of a function
-            if start.is_match(line) {
-                function.name = extract_function_name(line);
-                function.module = format!("{filename}:{loc}");
-                function.body = String::from("{");
+                // Handle the body of the function
+                } else if !function.name.is_empty() {
+                    function.body.push_str((String::from(line) + "\n").as_str());
 
-            // Handle the body of the function
-            } else if !function.name.is_empty() {
-                function.body.push_str((String::from(line) + "\n").as_str());
-
-                // Recognize the end of a function
-                if end.is_match(line) {
-                    functions.push(function);
-                    function = Function::new();
+                    // Recognize the end of a function
+                    if end.is_match(line) {
+                        functions.push(function);
+                        function = Function::new();
+                    }
                 }
             }
-        }
-    }
-
-    Ok(functions)
+            functions
+        })
 }
 
 fn generate_cluster(module: &str, functions: &[Function]) -> String {
     "subgraph cluster_".to_string()
         + &module.replace(['.', '-', '/', ':'], "_")
-        + "{label = \""
+        + "{label=\""
         + module
         + "\";bgcolor=\"#eeeeee\";"
         + &functions
@@ -97,7 +96,7 @@ fn generate_clusters(functions: &[Function]) -> String {
     functions
         .iter()
         .map(|f| f.module.clone())
-        .collect::<std::collections::HashSet<_>>()
+        .collect::<HashSet<_>>()
         .into_iter()
         .collect::<Vec<_>>()
         .iter()
@@ -122,15 +121,10 @@ fn table_row(label: &str, value: &str) -> String {
     format!("<tr><td align=\"left\">{label}</td><td align=\"right\">{value}</td></tr>")
 }
 
-fn generate_legend(functions: &[Function]) -> String {
+fn generate_legend(functions: &[Function], modules: &[String]) -> String {
     let lines_of_code = functions.iter().map(Function::body_length).sum::<usize>();
     let num_functions = functions.len();
-    let num_modules = functions
-        .iter()
-        .map(|f| f.module.clone())
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .len();
+    let num_modules = modules.len();
 
     "legend".to_string()
         + "["
@@ -149,9 +143,15 @@ fn generate_callgraph(
     filenames: &[String],
     start: &Regex,
     end: &Regex,
-) -> Result<String, std::io::Error> {
-    let functions = extract_functions(filenames, start, end)?;
-    Ok(String::from("strict digraph {")
+    function_cleanup: &Regex,
+) -> String {
+    let functions = extract_functions(filenames, start, end, function_cleanup);
+    let modules = functions
+        .iter()
+        .map(|f| f.module.clone())
+        .collect::<HashSet<_>>();
+
+    String::from("strict digraph {")
         + "graph [rankdir=LR];"
         + "node [shape=box;style=filled;fillcolor=\"#ffffff\"];"
         + generate_legend(&functions).as_str()
