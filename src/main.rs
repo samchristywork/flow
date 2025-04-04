@@ -126,14 +126,13 @@ fn table_row(label: &str, value: &str) -> String {
 }
 
 fn generate_legend(functions: &[Function]) -> String {
-    let lines_of_code = functions.iter().map(|f| f.body_length()).sum::<usize>();
+    let lines_of_code = functions.iter().map(Function::body_length).sum::<usize>();
     let num_functions = functions.len();
     let num_modules = functions
         .iter()
         .map(|f| f.module.clone())
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
-        .collect::<Vec<_>>()
         .len();
 
     "legend".to_string()
