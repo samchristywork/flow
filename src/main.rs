@@ -1,3 +1,4 @@
+use clap::Parser;
 use regex::Regex;
 use std::{collections::HashSet, fs::read_to_string, process::exit};
 
@@ -26,8 +27,9 @@ impl Function {
     }
 
     fn check_for_function_in_body(&self, f: &Self) -> bool {
-        regex::Regex::new(&format!(r"\b{}\b\(", f.name))
-            .expect("Invalid regex pattern")
+        // TODO: Add better error message
+        Regex::new(&format!(r"\b{}\b\(", f.name))
+            .unwrap()
             .is_match(&self.body)
     }
 
@@ -154,20 +156,47 @@ fn generate_callgraph(
     String::from("strict digraph {")
         + "graph [rankdir=LR];"
         + "node [shape=box;style=filled;fillcolor=\"#ffffff\"];"
-        + generate_legend(&functions).as_str()
+        + generate_legend(&functions, &modules.into_iter().collect::<Vec<_>>()).as_str()
         + generate_clusters(&functions).as_str()
         + generate_links(&functions).as_str()
-        + "}")
+        + "}"
+}
+
+#[derive(Parser, Debug)]
+#[clap(author = "Sam Christy", version = "1.0", about = "Generate a callgraph from source code", long_about = None)]
+struct Args {
+    /// Regex pattern to match the start of a function
+    #[clap(short, long, default_value = r"^fn |^pub fn ")]
+    start: String,
+
+    /// Regex pattern to match the end of a function
+    #[clap(short, long, default_value = r"^}$")]
+    end: String,
+
+    /// Regex pattern to match parts of the function signature to ignore
+    #[clap(short, long, default_value = r"\w+ |\(.+|\(")]
+    function_blacklist: String,
+
+    /// Input files
+    #[clap(value_parser)]
+    files: Vec<String>,
 }
 
 fn main() {
-    let filenames = std::env::args().skip(1).collect::<Vec<_>>();
-    let start = Regex::new(r"^fn |^pub fn ").expect("Invalid regex pattern");
-    let end = Regex::new(r"^}").expect("Invalid regex pattern");
+    let args = Args::parse();
 
-    let callgraph = generate_callgraph(&filenames, &start, &end).unwrap_or_else(|err| {
-        eprintln!("Error: {err}");
-        std::process::exit(1);
-    });
+    let (start, end, function_cleanup) = match (
+        Regex::new(&args.start),
+        Regex::new(&args.end),
+        Regex::new(&args.function_blacklist),
+    ) {
+        (Ok(s), Ok(e), Ok(f)) => (s, e, f),
+        (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => {
+            eprintln!("Error: {err}");
+            exit(1);
+        }
+    };
+
+    let callgraph = generate_callgraph(&args.files, &start, &end, &function_cleanup);
     println!("{callgraph}");
 }
