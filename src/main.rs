@@ -4,7 +4,6 @@ use std::{fs::read_to_string, process::exit};
 
 #[derive(Clone)]
 struct Module {
-    name: String,
     filename: String,
     source: String,
 }
