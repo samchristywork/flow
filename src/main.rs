@@ -4,17 +4,24 @@ use std::{fs::read_to_string, process::exit};
 
 #[derive(Clone)]
 struct Module {
+    name: String,
     filename: String,
-    source_code: String,
+    source: String,
 }
 
 impl Module {
     fn label(&self) -> String {
-        format!("{}:{}", self.filename, self.source_code.lines().count())
+        format!("{}:{}", self.filename, self.source.lines().count())
     }
 
-    fn id(&self)->String{
-        self.filename.replace(['.', '-', '/', ':'], "_")
+    fn id(&self) -> String {
+        self.filename.chars().fold(String::new(), |acc, c| {
+            if c.is_alphanumeric() {
+                acc + &c.to_string()
+            } else {
+                acc + "_"
+            }
+        })
     }
 }
 
@@ -26,20 +33,23 @@ struct Function {
 }
 
 impl Function {
-    fn body_length(&self) -> usize {
-        self.body.lines().count()
-    }
-
     fn label(&self) -> String {
-        format!("{}:{}", self.name, self.body_length())
+        format!("{}:{}", self.name, self.body.lines().count())
     }
 
     fn check_for_function_in_body(&self, f: &Self) -> bool {
         let body = self.body.lines().skip(1).collect::<String>();
-        // TODO: Add better error message
-        Regex::new(&format!(r"\b{}\b\(", f.name))
-            .unwrap()
-            .is_match(&body)
+        let pattern = format!(r"\b{}\b\(", f.name);
+        Regex::new(&pattern).map_or_else(
+            |_| {
+                eprintln!(
+                    "Error: Invalid regex pattern\nFunction: {}\nPattern: {pattern}",
+                    f.name
+                );
+                exit(1);
+            },
+            |re| re.is_match(&body),
+        )
     }
 
     fn link(&self, f: &Self) -> String {
@@ -60,38 +70,36 @@ fn extract_functions(
     end: &Regex,
     function_cleanup: &Regex,
 ) -> Vec<Function> {
-    modules
-        .iter()
-        .fold(Vec::new(), |mut functions, module| {
-            let mut function = Function {
-                name: String::new(),
-                body: String::new(),
-                module: module.clone(),
-            };
-            for line in module.source_code.lines() {
-                // Handle the start of a function
-                if start.is_match(line) {
-                    function.name = extract_function_name(line, function_cleanup);
-                    function.module = module.clone();
-                    function.body = line.to_string();
+    modules.iter().fold(Vec::new(), |mut functions, module| {
+        let mut function = Function {
+            name: String::new(),
+            body: String::new(),
+            module: module.clone(),
+        };
+        for line in module.source.lines() {
+            // Handle the start of a function
+            if start.is_match(line) {
+                function.name = extract_function_name(line, function_cleanup);
+                function.module = module.clone();
+                function.body = line.to_string();
 
-                // Handle the body of the function
-                } else if !function.name.is_empty() {
-                    function.body.push_str((String::from(line) + "\n").as_str());
+            // Handle the body of the function
+            } else if !function.name.is_empty() {
+                function.body.push_str((String::from(line) + "\n").as_str());
 
-                    // Recognize the end of a function
-                    if end.is_match(line) {
-                        functions.push(function);
-                        function = Function {
-                            name: String::new(),
-                            body: String::new(),
-                            module: module.clone(),
-                        };
-                    }
+                // Recognize the end of a function
+                if end.is_match(line) {
+                    functions.push(function);
+                    function = Function {
+                        name: String::new(),
+                        body: String::new(),
+                        module: module.clone(),
+                    };
                 }
             }
-            functions
-        })
+        }
+        functions
+    })
 }
 
 fn generate_cluster(module: &Module, functions: &[Function]) -> String {
@@ -108,7 +116,8 @@ fn generate_cluster(module: &Module, functions: &[Function]) -> String {
 }
 
 fn generate_clusters(modules: &[Module], functions: &[Function]) -> String {
-    modules.iter()
+    modules
+        .iter()
         .map(|module| generate_cluster(module, functions))
         .collect::<String>()
 }
@@ -133,7 +142,7 @@ fn table_row(label: &str, value: &str) -> String {
 fn generate_legend(modules: &[Module], functions: &[Function]) -> String {
     let lines_of_code = modules
         .iter()
-        .map(|m| m.source_code.lines().count())
+        .map(|m| m.source.lines().count())
         .sum::<usize>();
     let num_functions = functions.len();
     let num_modules = modules.len();
@@ -158,6 +167,10 @@ fn generate_callgraph(
     function_cleanup: &Regex,
 ) -> String {
     let functions = extract_functions(modules, start, end, function_cleanup);
+
+    modules.iter().for_each(|m| eprintln!("Module: {}", m.filename));
+    functions.iter().for_each(|f| eprintln!("Function: {}", f.name));
+
     String::from("strict digraph {")
         + "graph [rankdir=LR];"
         + "node [shape=box;style=filled;fillcolor=\"#ffffff\"];"
@@ -205,15 +218,12 @@ fn main() {
     let modules: Vec<Module> = args
         .files
         .iter()
-        .map(|filename| {
-            let source_code = read_to_string(filename).unwrap_or_else(|_| {
+        .map(|filename| Module {
+            filename: filename.clone(),
+            source: read_to_string(filename).unwrap_or_else(|_| {
                 eprintln!("Error: Could not read file {filename}");
                 exit(1);
-            });
-            Module {
-                filename: filename.clone(),
-                source_code,
-            }
+            }),
         })
         .collect();
 
