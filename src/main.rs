@@ -192,7 +192,7 @@ struct Args {
     end: String,
 
     /// Regex pattern to match parts of the function signature to ignore
-    #[clap(short, long, default_value = r"\w+ |\(.+|\(")]
+    #[clap(short, long, default_value = r"\(.+|\($|^\w+ ")]
     function_blacklist: String,
 
     /// Input files
