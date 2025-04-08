@@ -38,7 +38,7 @@ impl Function {
 
     fn check_for_function_in_body(&self, f: &Self) -> bool {
         let body = self.body.lines().skip(1).collect::<String>();
-        let pattern = format!(r"\b{}\b\(", f.name);
+        let pattern = format!(r"\b{}\b", f.name);
         Regex::new(&pattern).map_or_else(
             |_| {
                 eprintln!(
