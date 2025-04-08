@@ -68,6 +68,7 @@ fn extract_functions(
     start: &Regex,
     end: &Regex,
     function_cleanup: &Regex,
+    ignore_function: &Regex,
 ) -> Vec<Function> {
     modules.iter().fold(Vec::new(), |mut functions, module| {
         let mut function = Function {
@@ -88,7 +89,9 @@ fn extract_functions(
 
                 // Recognize the end of a function
                 if end.is_match(line) {
-                    functions.push(function);
+                    if !ignore_function.is_match(&function.name) {
+                        functions.push(function);
+                    }
                     function = Function {
                         name: String::new(),
                         body: String::new(),
@@ -97,6 +100,13 @@ fn extract_functions(
                 }
             }
         }
+
+        if !function.name.is_empty() {
+            if !ignore_function.is_match(&function.name) {
+                functions.push(function);
+            }
+        }
+
         functions
     })
 }
@@ -164,8 +174,9 @@ fn generate_callgraph(
     start: &Regex,
     end: &Regex,
     function_cleanup: &Regex,
+    ignore_function: &Regex,
 ) -> String {
-    let functions = extract_functions(modules, start, end, function_cleanup);
+    let functions = extract_functions(modules, start, end, function_cleanup, ignore_function);
 
     modules.iter().for_each(|m| eprintln!("Module: {}", m.filename));
     functions.iter().for_each(|f| eprintln!("Function: {}", f.name));
@@ -194,6 +205,10 @@ struct Args {
     #[clap(short, long, default_value = r"\(.+|\($|^\w+ ")]
     function_blacklist: String,
 
+    /// Regex pattern to match functions to ignore
+    #[clap(short, long, default_value = r"^$")]
+    ignore_function: String,
+
     /// Input files
     #[clap(value_parser)]
     files: Vec<String>,
@@ -202,13 +217,15 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    let (start, end, function_cleanup) = match (
+    let (start, end, function_cleanup, ignore_function) = match (
         Regex::new(&args.start),
         Regex::new(&args.end),
         Regex::new(&args.function_blacklist),
+        Regex::new(&args.ignore_function),
+
     ) {
-        (Ok(s), Ok(e), Ok(f)) => (s, e, f),
-        (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => {
+        (Ok(s), Ok(e), Ok(f), Ok(i)) => (s, e, f, i),
+        (Err(err), _, _, _) | (_, Err(err), _, _) | (_, _, Err(err), _) | (_, _, _, Err(err)) => {
             eprintln!("Error: {err}");
             exit(1);
         }
@@ -226,6 +243,6 @@ fn main() {
         })
         .collect();
 
-    let callgraph = generate_callgraph(&modules, &start, &end, &function_cleanup);
+    let callgraph = generate_callgraph(&modules, &start, &end, &function_cleanup, &ignore_function);
     println!("{callgraph}");
 }
