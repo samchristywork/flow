@@ -81,7 +81,7 @@ fn extract_functions(
             if start.is_match(line) {
                 function.name = extract_function_name(line, function_cleanup);
                 function.module = module.clone();
-                function.body = line.to_string();
+                function.body = line.to_string() + "\n";
 
             // Handle the body of the function
             } else if !function.name.is_empty() {
