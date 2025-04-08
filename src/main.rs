@@ -175,11 +175,19 @@ fn generate_callgraph(
     end: &Regex,
     function_cleanup: &Regex,
     ignore_function: &Regex,
+    print_function_body: bool,
 ) -> String {
     let functions = extract_functions(modules, start, end, function_cleanup, ignore_function);
 
-    modules.iter().for_each(|m| eprintln!("Module: {}", m.filename));
-    functions.iter().for_each(|f| eprintln!("Function: {}", f.name));
+    modules
+        .iter()
+        .for_each(|m| eprintln!("Module: {}", m.filename));
+    functions.iter().for_each(|f| {
+        eprintln!("Function: {}", f.name);
+        if print_function_body {
+            eprintln!("Body: {}", f.body);
+        }
+    });
 
     String::from("strict digraph {")
         + "graph [rankdir=LR];"
@@ -212,6 +220,10 @@ struct Args {
     /// Input files
     #[clap(value_parser)]
     files: Vec<String>,
+
+    /// Print the function body
+    #[clap(short, long)]
+    print_function_body: bool,
 }
 
 fn main() {
@@ -222,7 +234,6 @@ fn main() {
         Regex::new(&args.end),
         Regex::new(&args.function_blacklist),
         Regex::new(&args.ignore_function),
-
     ) {
         (Ok(s), Ok(e), Ok(f), Ok(i)) => (s, e, f, i),
         (Err(err), _, _, _) | (_, Err(err), _, _) | (_, _, Err(err), _) | (_, _, _, Err(err)) => {
@@ -243,6 +254,13 @@ fn main() {
         })
         .collect();
 
-    let callgraph = generate_callgraph(&modules, &start, &end, &function_cleanup, &ignore_function);
+    let callgraph = generate_callgraph(
+        &modules,
+        &start,
+        &end,
+        &function_cleanup,
+        &ignore_function,
+        args.print_function_body,
+    );
     println!("{callgraph}");
 }
